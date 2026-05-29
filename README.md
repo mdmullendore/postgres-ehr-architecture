@@ -1,1 +1,1 @@
-# postgres-ehr-architecture
+# Postgres EHR Architecture
