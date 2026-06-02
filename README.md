@@ -1,18 +1,22 @@
 # Postgres EHR Architecture
 
-PostgreSQL schema definitions for a small electronic health record (EHR) system. The project is SQL-first: each table lives in its own file under `schema/`, intended to be applied manually or wired into a migration tool later.
+PostgreSQL schema definitions for a small electronic health record (EHR) system. The project is SQL-first: each object lives under `schema/`, intended to be applied manually or wired into a migration tool later.
 
 ## Overview
 
-The model covers core clinical and operational entities:
+The model covers core clinical and operational entities with HIPAA-oriented safeguards at the database layer (audit logging, facility scoping, row-level security, and separation of staff vs. portal accounts).
 
 | Table | Purpose |
 |-------|---------|
-| `patients` | Demographics, contact info, MRN, and clinical flags |
-| `users` | Patient portal credentials (one account per patient) |
-| `providers` | Clinicians with NPI, license, specialty, and contact details |
 | `facilities` | Care sites (hospital, clinic, urgent care, virtual) |
+| `staff_roles` | Role codes for least-privilege staff access |
+| `staff_users` | Staff EHR accounts (scoped to a facility) |
+| `patients` | Demographics and contact info (scoped by `facility_id`) |
+| `patient_portal_users` | Patient portal credentials (one account per patient) |
+| `providers` | Clinicians with NPI, license, specialty, and contact details |
 | `appointments` | Scheduled visits linking patient, provider, and facility |
+| `clinical_notes` | Clinical/administrative narrative PHI (linked to appointments) |
+| `audit_log` | Append-only change log for PHI tables |
 
 All primary keys use `UUID` with `gen_random_uuid()` (requires the `pgcrypto` extension, or PostgreSQL 13+ built-in `gen_random_uuid()`).
 
@@ -20,64 +24,58 @@ All primary keys use `UUID` with `gen_random_uuid()` (requires the `pgcrypto` ex
 
 ```mermaid
 erDiagram
-    patients ||--o| users : "portal account"
+    facilities ||--o{ staff_users : "employs"
+    facilities ||--o{ patients : "registers"
+    staff_roles ||--o{ staff_users : "grants"
+    patients ||--o| patient_portal_users : "portal account"
     patients ||--o{ appointments : "books"
     providers ||--o{ appointments : "sees"
     facilities ||--o{ appointments : "at"
-    users ||--o{ appointments : "created_by"
+    appointments ||--o{ clinical_notes : "documents"
+    staff_users ||--o{ appointments : "created_by"
 
     patients {
         uuid patient_id PK
-        varchar mrn UK
-        varchar first_name
-        varchar last_name
-        date date_of_birth
+        uuid facility_id FK
+        varchar mrn
     }
 
-    users {
-        uuid user_id PK
+    patient_portal_users {
+        uuid portal_user_id PK
         uuid patient_id FK
         varchar email UK
-        text password_hash
     }
 
-    providers {
-        uuid provider_id PK
-        varchar npi_individual UK
-        varchar primary_specialty
-    }
-
-    facilities {
-        uuid facility_id PK
-        varchar facility_name
-        varchar facility_type
-    }
-
-    appointments {
-        uuid appointment_id PK
-        uuid patient_id
-        uuid provider_id
-        uuid facility_id
-        timestamptz start_time
-        timestamptz end_time
-        varchar appointment_status
+    staff_users {
+        uuid staff_user_id PK
+        uuid facility_id FK
+        uuid role_id FK
     }
 ```
-
-`appointments` columns reference patients, providers, and facilities by UUID; foreign key constraints are not yet defined in the DDL. `users` is intended to reference `patients` with `ON DELETE CASCADE`.
 
 ## Project layout
 
 ```
 schema/
 ├── database/
-│   └── ehr.sql          # CREATE DATABASE and connect
-└── tables/
-    ├── patients.sql
-    ├── users.sql
-    ├── providers.sql
-    ├── facilities.sql
-    └── appointments.sql
+│   └── ehr.sql
+├── functions/
+│   ├── set_updated_at.sql
+│   └── record_phi_audit.sql
+├── tables/
+│   ├── facilities.sql
+│   ├── staff_roles.sql
+│   ├── staff_users.sql
+│   ├── audit_log.sql
+│   ├── providers.sql
+│   ├── patients.sql
+│   ├── patient_portal_users.sql
+│   ├── appointments.sql
+│   └── clinical_notes.sql
+├── triggers/
+│   └── phi_audit_triggers.sql
+└── policies/
+    └── row_level_security.sql
 ```
 
 ## Prerequisites
@@ -96,33 +94,65 @@ psql -U postgres -f schema/database/ehr.sql
 # Enable UUID generation if not already available
 psql -U postgres -d ehr_db -c "CREATE EXTENSION IF NOT EXISTS pgcrypto;"
 
-# Apply tables in dependency order
-psql -U postgres -d ehr_db -f schema/tables/patients.sql
-psql -U postgres -d ehr_db -f schema/tables/users.sql
-psql -U postgres -d ehr_db -f schema/tables/providers.sql
+# Functions
+psql -U postgres -d ehr_db -f schema/functions/set_updated_at.sql
+psql -U postgres -d ehr_db -f schema/functions/record_phi_audit.sql
+
+# Tables (dependency order)
 psql -U postgres -d ehr_db -f schema/tables/facilities.sql
+psql -U postgres -d ehr_db -f schema/tables/staff_roles.sql
+psql -U postgres -d ehr_db -f schema/tables/staff_users.sql
+psql -U postgres -d ehr_db -f schema/tables/audit_log.sql
+psql -U postgres -d ehr_db -f schema/tables/providers.sql
+psql -U postgres -d ehr_db -f schema/tables/patients.sql
+psql -U postgres -d ehr_db -f schema/tables/patient_portal_users.sql
 psql -U postgres -d ehr_db -f schema/tables/appointments.sql
+psql -U postgres -d ehr_db -f schema/tables/clinical_notes.sql
+
+# Audit triggers and RLS (after all tables)
+psql -U postgres -d ehr_db -f schema/triggers/phi_audit_triggers.sql
+psql -U postgres -d ehr_db -f schema/policies/row_level_security.sql
 ```
 
-If you already have a target database, skip `ehr.sql` and run only the `tables/*.sql` files against that database.
+If you already have a target database, skip `ehr.sql` and run the remaining files in the order above.
+
+## Session context (application)
+
+Set these at the start of each request/transaction for audit and RLS:
+
+```sql
+SET LOCAL app.current_facility_id = '<facility-uuid>';
+SET LOCAL app.current_staff_user_id = '<staff-user-uuid>';
+-- optional, for portal actions:
+SET LOCAL app.current_portal_user_id = '<portal-user-uuid>';
+SET LOCAL app.client_ip = '203.0.113.10';
+SET LOCAL app.session_id = '<session-id>';
+```
+
+Use a non-superuser database role for the application so row-level security policies apply.
 
 ## Design notes
 
-**Patients** — MRN is unique facility-wide. `sex` is constrained to a fixed set; `gender_identity` is optional free text. `is_active` supports soft retirement of merged, deceased, or test records.
+**Patients** — `mrn` is unique per `facility_id`. Soft deactivation via `is_active`, `deactivated_at`, and `deactivation_reason`. `is_test` flags synthetic records. `blood_type` was removed from core demographics (collect in clinical workflows if needed). `created_by` / `updated_by` reference `staff_users`.
 
-**Users** — Portal logins tied to a single patient. Passwords are stored as bcrypt hashes only. An `updated_at` trigger is defined in DDL (requires a shared `set_updated_at()` function to be created before applying `users.sql`).
+**Staff** — `staff_users` are separate from `patient_portal_users`, with `staff_roles` for clinician and admin. Portal auth fields include MFA flag, lockout, and login timestamps.
 
-**Providers** — Includes NPI (10 digits), state license, optional DEA, specialty, and taxonomy. Partial index on active providers by specialty.
+**Patient portal** — One `patient_portal_users` row per patient. Login email is stored on the portal account; contact email remains on `patients`.
 
-**Facilities** — Typed sites with address, NPI, and optional CLIA. Index supports lookups of active facilities by name.
+**Appointments** — Foreign keys to patients, providers, and facilities. Scheduling fields only; clinical text moved to `clinical_notes`.
 
-**Appointments** — Status workflow from `Scheduled` through `Completed`, plus cancel/no-show/reschedule. `end_time` must be after `start_time`. Indexes support patient history, provider schedules, and time-range queries.
+**Clinical notes** — `chief_complaint`, `provider_note`, and `administrative` note types. Tighter access and audit than scheduling rows.
+
+**Audit** — `record_phi_audit()` trigger on PHI tables writes to `audit_log`. Restrict `UPDATE`/`DELETE` on `audit_log` for application roles in production.
+
+**Row-level security** — `patients`, `appointments`, `clinical_notes`, and `patient_portal_users` are scoped by `app.current_facility_id`.
 
 ## Status and next steps
 
-This repository is an evolving schema prototype. Additional tables include:
+Additional tables still planned:
 
 - insurance
 - clinical documents
 - orders
 - billing
+- consent / release-of-information tracking
