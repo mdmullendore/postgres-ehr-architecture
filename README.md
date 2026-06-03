@@ -20,7 +20,7 @@ The model covers core clinical and operational entities with HIPAA-oriented safe
 
 All primary keys use `UUID` with `gen_random_uuid()` (requires the `pgcrypto` extension, or PostgreSQL 13+ built-in `gen_random_uuid()`).
 
-## Entity relationships
+## UML Diagram
 
 ```mermaid
 erDiagram
@@ -34,38 +34,67 @@ erDiagram
     appointments ||--o{ clinical_notes : "documents"
     staff_users ||--o{ appointments : "created_by"
 
-    patients {
-        uuid patient_id PK
-        uuid facility_id FK
-        varchar mrn
+    facilities {
+        uuid facility_id PK
+        varchar facility_name
+        varchar facility_type
+        varchar address_line1
+        varchar address_line2
     }
 
-    patient_portal_users {
-        uuid portal_user_id PK
-        uuid patient_id FK
-        varchar email UK
+    staff_roles {
+        uuid role_id PK
+        varchar role_code UK
+        varchar role_name
+        timestamptz created_at
     }
 
     staff_users {
         uuid staff_user_id PK
         uuid facility_id FK
         uuid role_id FK
+        varchar email UK
+        text password_hash
     }
 
-    facilities {
-        uuid facility_id PK
+    patients {
+        uuid patient_id PK
+        uuid facility_id FK
+        varchar mrn
+        varchar first_name
+        varchar last_name
+    }
+
+    patient_portal_users {
+        uuid portal_user_id PK
+        uuid patient_id FK
+        varchar email UK
+        text password_hash
+        boolean mfa_enabled
     }
 
     providers {
         uuid provider_id PK
+        varchar first_name
+        varchar middle_name
+        varchar last_name
+        varchar suffix
     }
 
     appointments {
         uuid appointment_id PK
+        uuid patient_id FK
+        uuid provider_id FK
+        uuid facility_id FK
+        date appointment_date
     }
 
     clinical_notes {
         uuid clinical_note_id PK
+        uuid appointment_id FK
+        varchar note_type
+        text note_body
+        uuid created_by FK
     }
 ```
 
