@@ -1,6 +1,6 @@
 # Postgres EHR
 
-PostgreSQL schema definitions for a small electronic health record (EHR) system. The project is SQL-first: each object lives under `schema/`, intended to be applied manually or wired into a migration tool later.
+PostgreSQL schema definitions for a small electronic health record (EHR) system. The project is SQL-first: each object lives under `schema/`.
 
 ## Overview
 
