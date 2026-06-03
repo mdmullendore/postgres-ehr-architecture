@@ -1,0 +1,9 @@
+\i seed/facilities.sql
+\i seed/staff_roles.sql
+\i seed/staff_users.sql
+\i seed/providers.sql
+\i seed/patients.sql
+\i seed/patient_portal_users.sql
+\i seed/appointments.sql
+\i seed/clinical_notes.sql
+\i seed/audit_log.sql

@@ -1,0 +1,61 @@
+INSERT INTO facilities (
+    facility_id,
+    facility_name,
+    facility_type,
+    address_line1,
+    address_line2,
+    city,
+    state,
+    zip_code,
+    phone_number,
+    email,
+    fax_number,
+    npi_facility,
+    is_active
+) VALUES
+    (
+        '10000000-0000-4000-8000-000000000001',
+        'Riverside Family Clinic',
+        'Clinic',
+        '1200 Oak Street',
+        'Suite 200',
+        'Portland',
+        'OR',
+        '97201',
+        '503-555-0100',
+        'frontdesk@riverside-clinic.example',
+        '503-555-0101',
+        '1234567890',
+        TRUE
+    ),
+    (
+        '10000000-0000-4000-8000-000000000002',
+        'Cascade General Hospital',
+        'Hospital',
+        '4500 Mountain View Drive',
+        NULL,
+        'Seattle',
+        'WA',
+        '98101',
+        '206-555-0200',
+        'info@cascade-general.example',
+        '206-555-0201',
+        '2345678901',
+        TRUE
+    ),
+    (
+        '10000000-0000-4000-8000-000000000003',
+        'Sonuro Virtual Care',
+        'Virtual',
+        '100 Remote Care Lane',
+        NULL,
+        'San Francisco',
+        'CA',
+        '94102',
+        '415-555-0300',
+        'support@sonuro-virtual.example',
+        NULL,
+        NULL,
+        TRUE
+    )
+ON CONFLICT (facility_id) DO NOTHING;
