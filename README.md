@@ -51,6 +51,22 @@ erDiagram
         uuid facility_id FK
         uuid role_id FK
     }
+
+    facilities {
+        uuid facility_id PK
+    }
+
+    providers {
+        uuid provider_id PK
+    }
+
+    appointments {
+        uuid appointment_id PK
+    }
+
+    clinical_notes {
+        uuid clinical_note_id PK
+    }
 ```
 
 ## Project layout
@@ -76,16 +92,79 @@ schema/
 │   └── phi_audit_triggers.sql
 └── policies/
     └── row_level_security.sql
+seed/
+├── facilities.sql
+├── staff_roles.sql
+├── staff_users.sql
+├── providers.sql
+├── patients.sql
+├── patient_portal_users.sql
+├── appointments.sql
+├── clinical_notes.sql
+├── audit_log.sql
+└── seed.sql
+scripts/
+└── setup_database.py
+.env.example
+requirements.txt
 ```
 
 ## Prerequisites
 
 - PostgreSQL 14+ recommended
-- Locale `en_US.UTF-8` if you use `schema/database/ehr.sql` as written (adjust `LC_COLLATE` / `LC_CTYPE` for your environment)
+- Python 3.10+ with a virtual environment
+- A PostgreSQL superuser or database owner account (default: `postgres` on `localhost`)
 
-## Apply the schema
+## Set up the database (Python)
 
-From a superuser or database owner session:
+The setup script creates `ehr_db`, applies all schema SQL in dependency order, and loads seed data from `seed/`.
+
+```bash
+# Create and activate a virtual environment
+python3 -m venv .venv
+source .venv/bin/activate
+
+# Install dependencies
+pip install -r requirements.txt
+
+# Copy connection settings and edit as needed
+cp .env.example .env
+
+# Run setup (reads .env from the project root)
+python scripts/setup_database.py
+```
+
+Connection settings are loaded from `.env` in the project root (see `.env.example`). They map to standard [libpq environment variables](https://www.postgresql.org/docs/current/libpq-envars.html):
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `PGHOST` | `localhost` | PostgreSQL host |
+| `PGPORT` | `5432` | PostgreSQL port |
+| `PGUSER` | `postgres` | Role used to connect |
+| `PGPASSWORD` | *(empty)* | Password for `PGUSER` |
+| `EHR_DB_NAME` | `ehr_db` | Target database name |
+
+Example `.env`:
+
+```env
+PGHOST=localhost
+PGUSER=postgres
+PGPASSWORD=yourpassword
+```
+
+Optional flags:
+
+```bash
+python scripts/setup_database.py --schema-only   # schema only, no seed data
+python scripts/setup_database.py --seed-only     # seed only (schema must exist)
+python scripts/setup_database.py --db-name my_ehr_db
+```
+
+If `en_US.UTF-8` is unavailable on your system, the script falls back to server-default locale when creating the database.
+
+## Apply the schema manually (psql)
+
+Alternatively, from a superuser or database owner session:
 
 ```bash
 # Create the database (optional; edit locale if needed)
@@ -115,6 +194,12 @@ psql -U postgres -d ehr_db -f schema/policies/row_level_security.sql
 ```
 
 If you already have a target database, skip `ehr.sql` and run the remaining files in the order above.
+
+To load seed data manually after the schema is applied:
+
+```bash
+psql -U postgres -d ehr_db -f seed/seed.sql
+```
 
 ## Session context (application)
 
